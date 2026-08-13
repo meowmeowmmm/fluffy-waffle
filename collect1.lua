@@ -104,3 +104,105 @@ task.spawn(function()
 end)
 
 print("🟢 Auto Accept + Decline after 10s loaded")
+
+-- ==========================================================
+-- ▶ ANTI-AFK + RECONNECT
+-- ==========================================================
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+-- Ждём LocalPlayer, если вдруг ещё не доступен
+while not LocalPlayer do
+    task.wait(0.1)
+    LocalPlayer = Players.LocalPlayer
+end
+
+local TeleportService = game:GetService("TeleportService")
+local GuiService = game:GetService("GuiService")
+local RunService = game:GetService("RunService")
+
+local VirtualUser
+pcall(function()
+    VirtualUser = game:GetService("VirtualUser")
+end)
+
+local SETTINGS = {
+    ReconnectDelay = 3, -- задержка перед реконнектом в секундах
+}
+
+local isReconnecting = false
+
+-- Анти-АФК
+spawn(function()
+    while wait(120) do
+        pcall(function()
+            if VirtualUser then
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new(math.random(100, 800), math.random(100, 600)))
+            end
+        end)
+    end
+end)
+
+-- Реконнект
+local function forceReconnect(reason)
+    if isReconnecting then return end
+
+    -- Чтобы в Studio не пытался телепортировать и не блокировал скрипт
+    if RunService:IsStudio() then
+        warn("🔌 Reconnect skipped in Studio: " .. tostring(reason))
+        return
+    end
+
+    isReconnecting = true
+    print("🔌 Reconnecting: " .. tostring(reason))
+
+    spawn(function()
+        wait(SETTINGS.ReconnectDelay)
+        pcall(function()
+            TeleportService:Teleport(game.PlaceId, LocalPlayer)
+        end)
+    end)
+
+    while true do
+        wait(1)
+        if not LocalPlayer or not LocalPlayer.Parent then
+            break
+        end
+    end
+end
+
+pcall(function()
+    GuiService.ErrorMessageChanged:Connect(function(errorMessage)
+        if errorMessage and errorMessage ~= "" then
+            forceReconnect("Error: " .. errorMessage)
+        end
+    end)
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    if player == LocalPlayer then
+        forceReconnect("PlayerRemoving")
+    end
+end)
+
+LocalPlayer.OnTeleport:Connect(function(state)
+    if state == Enum.TeleportState.Failed or state == Enum.TeleportState.Started then
+        forceReconnect("OnTeleport: " .. tostring(state))
+    end
+end)
+
+local consecutiveFailures = 0
+RunService.Heartbeat:Connect(function()
+    if not LocalPlayer or not LocalPlayer.Parent then
+        consecutiveFailures = consecutiveFailures + 1
+        if consecutiveFailures >= 3 and not isReconnecting then
+            forceReconnect("Heartbeat")
+        end
+    else
+        consecutiveFailures = 0
+    end
+end)
+
+print("🟢 Anti-AFK + Reconnect loaded")
